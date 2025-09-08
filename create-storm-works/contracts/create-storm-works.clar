@@ -1,265 +1,175 @@
-;; CreateStorm - Dynamic Creative Asset Management Platform
-;; Revolutionizing creative asset management through Dynamic Provenance Chains
+;; CreateStorm - Simplified Creative Asset Management Platform
 
 ;; Error Constants
-(define-constant ERR-NOT-AUTHORIZED (err u1000))
-(define-constant ERR-ASSET-NOT-FOUND (err u1001))
-(define-constant ERR-INVALID-PERCENTAGE (err u1002))
-(define-constant ERR-INSUFFICIENT-PAYMENT (err u1003))
-(define-constant ERR-ASSET-ALREADY-EXISTS (err u1004))
-(define-constant ERR-INVALID-CONTRIBUTOR (err u1005))
-(define-constant ERR-REVENUE-SPLIT-ERROR (err u1006))
-(define-constant ERR-INVALID-LICENSE-TYPE (err u1007))
-(define-constant ERR-PARENT-NOT-FOUND (err u1008))
-(define-constant ERR-INVALID-PROVENANCE (err u1009))
-(define-constant ERR-COLLABORATION-FULL (err u1010))
-(define-constant ERR-ORACLE-VIOLATION (err u1011))
+(define-constant ERR_NOT_AUTHORIZED (err u1000))
+(define-constant ERR_ASSET_NOT_FOUND (err u1001))
+(define-constant ERR_INVALID_PERCENTAGE (err u1002))
+(define-constant ERR_INSUFFICIENT_PAYMENT (err u1003))
+(define-constant ERR_INVALID_TITLE (err u1004))
+(define-constant ERR_INVALID_LICENSE_TYPE (err u1005))
+(define-constant ERR_PARENT_NOT_FOUND (err u1006))
 
-;; Contract owner and admin
-(define-data-var contract-owner principal tx-sender)
-(define-data-var platform-fee-percentage uint u250) ;; 2.5%
-(define-data-var next-asset-id uint u1)
-(define-data-var oracle-threshold uint u70) ;; 70% similarity threshold
+;; Contract variables
+(define-data-var contract_owner principal tx-sender)
+(define-data-var platform_fee_rate uint u250) ;; 2.5% (250/10000)
+(define-data-var next_asset_id uint u1)
 
-;; License types
-(define-constant LICENSE-PERSONAL u1)
-(define-constant LICENSE-COMMERCIAL u2)
-(define-constant LICENSE-DERIVATIVE u3)
+;; License types (simplified)
+(define-constant LICENSE_PERSONAL u1)
+(define-constant LICENSE_COMMERCIAL u2)
+(define-constant LICENSE_FULL u3)
 
-;; Creative Asset Structure
-(define-map creative-assets
-  { asset-id: uint }
+;; Creative Asset Structure (simplified)
+(define-map assets
+  { asset_id: uint }
   {
     creator: principal,
-    title: (string-ascii 100),
-    provenance-dna: (buff 32),
-    parent-asset: (optional uint),
-    creative-distance: uint,
-    total-revenue: uint,
-    creation-timestamp: uint,
-    license-types: uint,
-    is-collaborative: bool,
-    derivative-count: uint
-  }
-)
-
-;; Provenance Chain Tracking
-(define-map provenance-chains
-  { asset-id: uint }
-  {
-    inspiration-sources: (list 10 uint),
-    contributor-weights: (list 10 uint),
-    genealogy-depth: uint,
-    attribution-vector: (buff 20)
-  }
-)
-
-;; Revenue Distribution Maps
-(define-map revenue-splits
-  { asset-id: uint, beneficiary: principal }
-  { percentage: uint, total-earned: uint }
-)
-
-;; Collaborative Creation Pools
-(define-map collaboration-pools
-  { pool-id: uint }
-  {
-    contributors: (list 20 principal),
-    contribution-percentages: (list 20 uint),
-    pool-balance: uint,
-    is-active: bool,
-    creation-deadline: uint
+    title: (string-ascii 64),
+    parent_asset: (optional uint),
+    creation_time: uint,
+    license_type: uint,
+    total_revenue: uint
   }
 )
 
 ;; License Pricing
-(define-map license-pricing
-  { asset-id: uint, license-type: uint }
-  { price: uint, usage-count: uint }
+(define-map license_prices
+  { asset_id: uint }
+  { price: uint, sales: uint }
 )
 
-;; Intellectual Property Shield
-(define-map ip-protection
-  { asset-id: uint }
-  {
-    copyright-timestamp: uint,
-    protection-level: uint,
-    verified-ownership: bool,
-    infringement-reports: uint
-  }
+;; Revenue splits for derivative assets
+(define-map revenue_shares
+  { asset_id: uint, recipient: principal }
+  { percentage: uint }
 )
 
-;; Fair Use Oracle Data
-(define-map fair-use-assessments
-  { original-asset: uint, derivative-asset: uint }
-  {
-    similarity-score: uint,
-    fair-use-approved: bool,
-    assessment-timestamp: uint
-  }
+;; Helper Functions
+(define-private (is_valid_license_type (license_type uint))
+  (and (>= license_type LICENSE_PERSONAL) (<= license_type LICENSE_FULL))
 )
 
-;; Dynamic Attribution Vectors
-(define-map attribution-vectors
-  { asset-id: uint }
-  {
-    market-performance: uint,
-    contribution-score: uint,
-    influence-factor: uint,
-    revenue-multiplier: uint
-  }
+(define-private (is_valid_percentage (percentage uint))
+  (and (>= percentage u1) (<= percentage u100))
+)
+
+(define-private (calculate_platform_fee (amount uint))
+  (/ (* amount (var-get platform_fee_rate)) u10000)
 )
 
 ;; Admin Functions
-(define-public (set-platform-fee (new-fee uint))
+(define-public (set_platform_fee (new_fee uint))
   (begin
-    (asserts! (is-eq tx-sender (var-get contract-owner)) ERR-NOT-AUTHORIZED)
-    (asserts! (<= new-fee u1000) ERR-INVALID-PERCENTAGE)
-    (ok (var-set platform-fee-percentage new-fee))
+    (asserts! (is-eq tx-sender (var-get contract_owner)) ERR_NOT_AUTHORIZED)
+    (asserts! (<= new_fee u1000) ERR_INVALID_PERCENTAGE) ;; Max 10%
+    (var-set platform_fee_rate new_fee)
+    (ok true)
   )
 )
 
-(define-public (update-oracle-threshold (new-threshold uint))
-  (begin
-    (asserts! (is-eq tx-sender (var-get contract-owner)) ERR-NOT-AUTHORIZED)
-    (asserts! (and (>= new-threshold u1) (<= new-threshold u100)) ERR-INVALID-PERCENTAGE)
-    (ok (var-set oracle-threshold new-threshold))
-  )
-)
-
-;; Core Creative Asset Functions
-(define-public (mint-evolving-asset 
-  (title (string-ascii 100))
-  (provenance-dna (buff 32))
-  (parent-asset (optional uint))
-  (license-types uint)
-  (inspiration-sources (list 10 uint))
+;; Core Functions
+(define-public (create_asset 
+  (title (string-ascii 64))
+  (license_type uint)
 )
   (let
     (
-      (asset-id (var-get next-asset-id))
-      (creative-distance (calculate-creative-distance parent-asset))
+      (asset_id (var-get next_asset_id))
     )
-    (asserts! (<= (len title) u100) ERR-INVALID-CONTRIBUTOR)
-    (asserts! (validate-license-types license-types) ERR-INVALID-LICENSE-TYPE)
+    ;; Validations
+    (asserts! (> (len title) u0) ERR_INVALID_TITLE)
+    (asserts! (<= (len title) u64) ERR_INVALID_TITLE)
+    (asserts! (is_valid_license_type license_type) ERR_INVALID_LICENSE_TYPE)
     
-    ;; Validate parent asset exists if specified
-    (match parent-asset
-      parent-id (asserts! (is-some (map-get? creative-assets { asset-id: parent-id })) ERR-PARENT-NOT-FOUND)
-      true
-    )
-    
-    ;; Create the creative asset
-    (map-set creative-assets
-      { asset-id: asset-id }
+    ;; Create asset
+    (map-set assets
+      { asset_id: asset_id }
       {
         creator: tx-sender,
         title: title,
-        provenance-dna: provenance-dna,
-        parent-asset: parent-asset,
-        creative-distance: creative-distance,
-        total-revenue: u0,
-        creation-timestamp: burn-block-height,
-        license-types: license-types,
-        is-collaborative: false,
-        derivative-count: u0
+        parent_asset: none,
+        creation_time: burn-block-height,
+        license_type: license_type,
+        total_revenue: u0
       }
     )
     
-    ;; Set up provenance chain
-    (map-set provenance-chains
-      { asset-id: asset-id }
-      {
-        inspiration-sources: inspiration-sources,
-        contributor-weights: (list u100),
-        genealogy-depth: creative-distance,
-        attribution-vector: (generate-attribution-vector asset-id)
-      }
+    ;; Set initial revenue share (100% to creator)
+    (map-set revenue_shares
+      { asset_id: asset_id, recipient: tx-sender }
+      { percentage: u100 }
     )
     
-    ;; Initial revenue split (100% to creator)
-    (map-set revenue-splits
-      { asset-id: asset-id, beneficiary: tx-sender }
-      { percentage: u10000, total-earned: u0 }
-    )
-    
-    ;; Initialize IP protection
-    (map-set ip-protection
-      { asset-id: asset-id }
-      {
-        copyright-timestamp: burn-block-height,
-        protection-level: u1,
-        verified-ownership: true,
-        infringement-reports: u0
-      }
-    )
-    
-    ;; Update parent's derivative count
-    (match parent-asset
-      parent-id (update-derivative-count parent-id)
-      true
-    )
-    
-    (var-set next-asset-id (+ asset-id u1))
-    (ok asset-id)
+    ;; Update next asset ID
+    (var-set next_asset_id (+ asset_id u1))
+    (ok asset_id)
   )
 )
 
-(define-public (create-derivative-asset
-  (parent-asset-id uint)
-  (title (string-ascii 100))
-  (provenance-dna (buff 32))
-  (contribution-percentage uint)
+(define-public (create_derivative_asset
+  (parent_id uint)
+  (title (string-ascii 64))
+  (creator_share uint)
 )
   (let
     (
-      (parent-asset (unwrap! (map-get? creative-assets { asset-id: parent-asset-id }) ERR-ASSET-NOT-FOUND))
-      (asset-id (var-get next-asset-id))
+      (asset_id (var-get next_asset_id))
+      (parent_asset (unwrap! (map-get? assets { asset_id: parent_id }) ERR_PARENT_NOT_FOUND))
+      (parent_share (- u100 creator_share))
     )
-    (asserts! (and (>= contribution-percentage u1) (<= contribution-percentage u100)) ERR-INVALID-PERCENTAGE)
+    ;; Validations
+    (asserts! (> (len title) u0) ERR_INVALID_TITLE)
+    (asserts! (<= (len title) u64) ERR_INVALID_TITLE)
+    (asserts! (is_valid_percentage creator_share) ERR_INVALID_PERCENTAGE)
+    (asserts! (< creator_share u100) ERR_INVALID_PERCENTAGE) ;; Must leave some for parent
     
-    ;; Check fair use oracle
-    (asserts! (passes-fair-use-check parent-asset-id provenance-dna) ERR-ORACLE-VIOLATION)
+    ;; Create derivative asset
+    (map-set assets
+      { asset_id: asset_id }
+      {
+        creator: tx-sender,
+        title: title,
+        parent_asset: (some parent_id),
+        creation_time: burn-block-height,
+        license_type: (get license_type parent_asset),
+        total_revenue: u0
+      }
+    )
     
-    ;; Mint derivative asset
-    (try! (mint-evolving-asset 
-      title 
-      provenance-dna 
-      (some parent-asset-id) 
-      (get license-types parent-asset)
-      (list parent-asset-id)
-    ))
+    ;; Set revenue shares
+    (map-set revenue_shares
+      { asset_id: asset_id, recipient: tx-sender }
+      { percentage: creator_share }
+    )
     
-    ;; Set up revenue splits for derivative
-    (try! (setup-derivative-revenue-splits asset-id parent-asset-id contribution-percentage))
+    (map-set revenue_shares
+      { asset_id: asset_id, recipient: (get creator parent_asset) }
+      { percentage: parent_share }
+    )
     
-    (ok asset-id)
+    ;; Update next asset ID
+    (var-set next_asset_id (+ asset_id u1))
+    (ok asset_id)
   )
 )
 
-(define-public (purchase-license
-  (asset-id uint)
-  (license-type uint)
-  (payment uint)
+(define-public (set_license_price
+  (asset_id uint)
+  (price uint)
 )
   (let
     (
-      (asset (unwrap! (map-get? creative-assets { asset-id: asset-id }) ERR-ASSET-NOT-FOUND))
-      (license-price (unwrap! (map-get? license-pricing { asset-id: asset-id, license-type: license-type }) ERR-INVALID-LICENSE-TYPE))
+      (asset (unwrap! (map-get? assets { asset_id: asset_id }) ERR_ASSET_NOT_FOUND))
     )
-    (asserts! (>= payment (get price license-price)) ERR-INSUFFICIENT-PAYMENT)
-    (asserts! (validate-license-availability asset license-type) ERR-INVALID-LICENSE-TYPE)
+    ;; Only creator can set price
+    (asserts! (is-eq tx-sender (get creator asset)) ERR_NOT_AUTHORIZED)
     
-    ;; Process payment and distribute revenue
-    (try! (stx-transfer? payment tx-sender (get creator asset)))
-    (try! (distribute-revenue asset-id payment))
-    
-    ;; Update license usage count
-    (map-set license-pricing
-      { asset-id: asset-id, license-type: license-type }
-      {
-        price: (get price license-price),
-        usage-count: (+ (get usage-count license-price) u1)
+    ;; Set price
+    (map-set license_prices
+      { asset_id: asset_id }
+      { 
+        price: price, 
+        sales: (default-to u0 (get sales (map-get? license_prices { asset_id: asset_id })))
       }
     )
     
@@ -267,48 +177,60 @@
   )
 )
 
-(define-public (create-collaboration-pool
-  (contributors (list 20 principal))
-  (percentages (list 20 uint))
-  (deadline uint)
+(define-public (purchase_license
+  (asset_id uint)
 )
-  (let
-    ((pool-id (var-get next-asset-id)))
-    (asserts! (is-eq (len contributors) (len percentages)) ERR-INVALID-CONTRIBUTOR)
-    (asserts! (is-eq (fold + percentages u0) u10000) ERR-INVALID-PERCENTAGE)
-    (asserts! (> deadline burn-block-height) ERR-INVALID-CONTRIBUTOR)
-    
-    (map-set collaboration-pools
-      { pool-id: pool-id }
-      {
-        contributors: contributors,
-        contribution-percentages: percentages,
-        pool-balance: u0,
-        is-active: true,
-        creation-deadline: deadline
-      }
-    )
-    
-    (ok pool-id)
-  )
-)
-
-(define-public (report-infringement (original-asset uint) (infringing-asset uint))
   (let
     (
-      (original (unwrap! (map-get? creative-assets { asset-id: original-asset }) ERR-ASSET-NOT-FOUND))
-      (ip-data (unwrap! (map-get? ip-protection { asset-id: original-asset }) ERR-ASSET-NOT-FOUND))
+      (asset (unwrap! (map-get? assets { asset_id: asset_id }) ERR_ASSET_NOT_FOUND))
+      (pricing (unwrap! (map-get? license_prices { asset_id: asset_id }) ERR_ASSET_NOT_FOUND))
+      (price (get price pricing))
+      (fee_amount (calculate_platform_fee price))
+      (net_amount (- price fee_amount))
     )
-    (asserts! (is-eq tx-sender (get creator original)) ERR-NOT-AUTHORIZED)
+    ;; Transfer platform fee to contract owner
+    (try! (stx-transfer? fee_amount tx-sender (var-get contract_owner)))
     
-    (map-set ip-protection
-      { asset-id: original-asset }
-      {
-        copyright-timestamp: (get copyright-timestamp ip-data),
-        protection-level: (get protection-level ip-data),
-        verified-ownership: (get verified-ownership ip-data),
-        infringement-reports: (+ (get infringement-reports ip-data) u1)
+    ;; Distribute remaining amount based on revenue shares
+    (let
+      (
+        (creator_share (default-to { percentage: u100 } 
+          (map-get? revenue_shares { asset_id: asset_id, recipient: (get creator asset) })))
+        (creator_amount (/ (* net_amount (get percentage creator_share)) u100))
+      )
+      ;; Transfer to creator
+      (try! (stx-transfer? creator_amount tx-sender (get creator asset)))
+      
+      ;; If there's a parent asset, transfer remaining to parent creator
+      (match (get parent_asset asset)
+        parent_id
+          (let
+            (
+              (parent_asset_data (unwrap-panic (map-get? assets { asset_id: parent_id })))
+              (parent_amount (- net_amount creator_amount))
+            )
+            (if (> parent_amount u0)
+              (try! (stx-transfer? parent_amount tx-sender (get creator parent_asset_data)))
+              true
+            )
+          )
+        true
+      )
+    )
+    
+    ;; Update sales count
+    (map-set license_prices
+      { asset_id: asset_id }
+      { 
+        price: price,
+        sales: (+ (get sales pricing) u1)
       }
+    )
+    
+    ;; Update total revenue
+    (map-set assets
+      { asset_id: asset_id }
+      (merge asset { total_revenue: (+ (get total_revenue asset) price) })
     )
     
     (ok true)
@@ -316,8 +238,26 @@
 )
 
 ;; Read-only Functions
-(define-read-only (get-asset-details (asset-id uint))
-  (map-get? creative-assets { asset-id: asset-id })
+(define-read-only (get_asset (asset_id uint))
+  (map-get? assets { asset_id: asset_id })
 )
 
-(define-read-only (get-
+(define-read-only (get_asset_price (asset_id uint))
+  (map-get? license_prices { asset_id: asset_id })
+)
+
+(define-read-only (get_revenue_share (asset_id uint) (recipient principal))
+  (map-get? revenue_shares { asset_id: asset_id, recipient: recipient })
+)
+
+(define-read-only (get_platform_fee)
+  (var-get platform_fee_rate)
+)
+
+(define-read-only (get_next_asset_id)
+  (var-get next_asset_id)
+)
+
+(define-read-only (get_contract_owner)
+  (var-get contract_owner)
+)
